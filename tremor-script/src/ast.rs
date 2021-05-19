@@ -638,6 +638,55 @@ where
     'script: 'event,
     'event: 'run,
 {
+    /// Runs the script and evaluates to a resulting event.
+    /// This expects the script to be imutable!
+    ///
+    /// # Errors
+    /// on runtime errors or if it isn't an imutable script
+    pub fn run_imut(
+        &'script self,
+        context: &'run crate::EventContext,
+        aggr: AggrType,
+        event: &'run Value<'event>,
+        state: &'run Value<'static>,
+        meta: &'run Value<'event>,
+    ) -> Result<Return<'event>> {
+        let mut local = LocalStack::with_size(self.locals);
+
+        let opts = ExecOpts {
+            result_needed: true,
+            aggr,
+        };
+
+        let env = Env {
+            context,
+            consts: &self.consts,
+            aggrs: &self.aggregates,
+            meta: &self.node_meta,
+            recursion_limit: crate::recursion_limit(),
+        };
+
+        if let Some(expr) = self.exprs.last() {
+            if let Expr::Imut(imut) = expr {
+                let v = stry!(imut.run(opts.with_result(), &env, event, state, meta, &mut local));
+                return Ok(Return::Emit {
+                    value: v.into_owned(),
+                    port: None,
+                });
+            } else {
+                let e = expr.extent(&self.node_meta);
+                return error_generic(
+                    &e.expand_lines(2),
+                    expr,
+                    &"Not an imutable expression",
+                    &self.node_meta,
+                );
+            }
+        }
+
+        // We never reach here but rust can't figure that out
+        Ok(Return::Drop)
+    }
     /// Runs the script and evaluates to a resulting event
     ///
     /// # Errors
